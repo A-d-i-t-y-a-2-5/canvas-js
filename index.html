@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draggable Line Chart with CSV Export</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    .chart-container {
+      position: relative;
+      height: 400px;
+      width: 100%;
+      margin-top: 20px;
+    }
+
+    .info {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f0f8ff;
+      border-left: 4px solid #4c7cff;
+    }
+
+    .control-panel {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #f5f5f5;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .control-panel label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    .control-panel input {
+      width: 100px;
+      padding: 8px;
+      margin-right: 10px;
+    }
+
+    .control-panel button {
+      padding: 8px 16px;
+      background-color: #4c7cff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .control-panel button:hover {
+      background-color: #3a67e0;
+    }
+
+    .export-button {
+      margin-top: 15px;
+      background-color: #28a745;
+    }
+
+    .export-button:hover {
+      background-color: #218838;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Draggable Line Chart</h1>
+  <p>Drag any point up or down to modify the y-values of the chart.</p>
+  
+  <div class="control-panel">
+    <h3>Control Panel</h3>
+    <div class="control-row">
+      <label for="pointCount">Number of data points:</label>
+      <input type="number" id="pointCount" min="2" max="50" value="10">
+      <button id="updatePoints">Update</button>
+    </div>
+    <div class="control-row">
+      <button id="randomizeData">Randomize Data</button>
+      <button id="resetData" style="margin-left: 10px;">Reset Data</button>
+    </div>
+    <div class="control-row">
+      <button id="exportCSV" class="export-button">Export to CSV</button>
+    </div>
+  </div>
+
+  <div class="chart-container">
+    <canvas id="myChart"></canvas>
+  </div>
+  
+  <div class="info">
+    <p>Last modified point: <span id="modified-point">None yet</span></p>
+    <p>Current data points: <span id="current-data">10</span></p>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2.2.5/dist/chartjs-plugin-dragdata.min.js"></script>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const ctx = document.getElementById('myChart').getContext('2d');
+      let myChart;
+      
+      // Default data
+      const defaultPointCount = 10;
+      const defaultData = [12, 19, 3, 5, 2, 3, 8, 14, 10, 7];
+      let currentData = [...defaultData];
+      
+      // Initialize with default data
+      initChart(defaultPointCount);
+      
+      // Function to initialize or update the chart
+      function initChart(pointCount) {
+        // Ensure we have enough data for the requested points
+        ensureDataLength(pointCount);
+        
+        // Create labels based on point count
+        const labels = Array.from({length: pointCount}, (_, i) => `Point ${i+1}`);
+        
+        // If chart already exists, destroy it
+        if (myChart) {
+          myChart.destroy();
+        }
+        
+        // Create new chart
+        myChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Draggable Data',
+              data: currentData.slice(0, pointCount),
+              borderColor: 'rgb(75, 192, 192)',
+              backgroundColor: 'rgba(75, 192, 192, 0.2)',
+              tension: 0.4,
+              fill: true,
+              pointRadius: 6,
+              pointHoverRadius: 10,
+              pointBackgroundColor: 'rgb(75, 192, 192)',
+              pointBorderColor: '#fff',
+              pointBorderWidth: 2,
+              pointHitRadius: 10
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true,
+                max: 25
+              }
+            },
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    return `Value: ${context.raw}`;
+                  }
+                }
+              },
+              dragData: {
+                round: 1,
+                showTooltip: true,
+                onDragStart: function(e, datasetIndex, index, value) {
+                  return true;
+                },
+                onDrag: function(e, datasetIndex, index, value) {
+                  // Update the data array during drag
+                  currentData[index] = value;
+                },
+                onDragEnd: function(e, datasetIndex, index, value) {
+                  // Update the info text when dragging ends
+                  document.getElementById('modified-point').textContent = 
+                    `Point ${index + 1} (y-value: ${value})`;
+                }
+              }
+            }
+          }
+        });
+        
+        // Update info display
+        document.getElementById('current-data').textContent = pointCount;
+      }
+      
+      // Ensure we have enough data for the requested points
+      function ensureDataLength(count) {
+        // If we need more data points than we have, add random values
+        if (currentData.length < count) {
+          for (let i = currentData.length; i < count; i++) {
+            currentData.push(Math.floor(Math.random() * 20) + 1);
+          }
+        }
+      }
+      
+      // Event listener for updating the number of points
+      document.getElementById('updatePoints').addEventListener('click', function() {
+        const pointCount = parseInt(document.getElementById('pointCount').value);
+        if (pointCount >= 2 && pointCount <= 100) {
+          initChart(pointCount);
+        } else {
+          alert("Please enter a number between 2 and 100.");
+        }
+      });
+      
+      // Event listener for randomizing data
+      document.getElementById('randomizeData').addEventListener('click', function() {
+        const pointCount = parseInt(document.getElementById('current-data').textContent);
+        currentData = Array.from({length: pointCount}, () => Math.floor(Math.random() * 20) + 1);
+        initChart(pointCount);
+      });
+      
+      // Event listener for resetting data
+      document.getElementById('resetData').addEventListener('click', function() {
+        const pointCount = parseInt(document.getElementById('current-data').textContent);
+        // Reset to default data where available, or use random data for additional points
+        currentData = [...defaultData];
+        ensureDataLength(pointCount);
+        initChart(pointCount);
+      });
+      
+      // CSV Export functionality
+      document.getElementById('exportCSV').addEventListener('click', function() {
+        exportToCSV();
+      });
+      
+      // Function to export current data to CSV
+      function exportToCSV() {
+        const pointCount = parseInt(document.getElementById('current-data').textContent);
+        const data = currentData.slice(0, pointCount);
+        
+        // CSV Header
+        let csvContent = "x,y\n";
+        
+        // Add data rows with integer x values (0 to n-1)
+        for (let i = 0; i < pointCount; i++) {
+          csvContent += `${i},${data[i]}\n`;
+        }
+        
+        // Create a Blob and download link
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        
+        // Create download link and trigger click
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'chart_data.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    });
+  </script>
+</body>
+</html>
