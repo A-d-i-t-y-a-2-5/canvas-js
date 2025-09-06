@@ -126,7 +126,13 @@
       // Function to initialize or update the chart
       function initChart(pointCount, maxY) {
         ensureDataLength(pointCount);
-        const labels = Array.from({length: pointCount}, (_, i) => `Point ${i+1}`);
+        // Generate labels as a series of timestamps (e.g., 00:00:00, 00:01:00, ...)
+        const base = new Date();
+        base.setHours(0, 0, 0, 0);
+        const labels = Array.from({length: pointCount}, (_, i) => {
+          const d = new Date(base.getTime() + i * 1 * 60 * 1000); // 1 min interval
+          return d.toISOString(); // ISO format (YYYY-MM-DDTHH:MM:SSZ
+        });
         if (myChart) {
           myChart.destroy();
         }
@@ -236,10 +242,15 @@
         
         // CSV Header
         let csvContent = "x,y\n";
-        
-        // Add data rows with integer x values (0 to n-1)
+        // Use the same labels as the chart for the x values
+        const base = new Date();
+        base.setHours(0, 0, 0, 0);
+        const labels = Array.from({length: pointCount}, (_, i) => {
+          const d = new Date(base.getTime() + i * 1 * 60 * 1000);
+          return d.toISOString(); // ISO format (YYYY-MM-DDTHH:MM:SSZ
+        });
         for (let i = 0; i < pointCount; i++) {
-          csvContent += `${i},${data[i]}\n`;
+          csvContent += `${labels[i]},${data[i]}\n`;
         }
         
         // Create a Blob and download link
