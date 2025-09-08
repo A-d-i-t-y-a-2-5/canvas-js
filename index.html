@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Draggable Line Chart with CSV Export</title>
+  <title>Draggable Line Chart with Multi-Point Selection and CSV Export</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -11,21 +11,38 @@
       margin: 0 auto;
       padding: 20px;
     }
-    
     .chart-container {
       position: relative;
       height: 400px;
       width: 100%;
       margin-top: 20px;
+      border: 1px solid #ccc; /* Add border for visual clarity */
     }
-
+    #myChart {
+      display: block; /* Ensure canvas doesn't have extra space below */
+    }
+    .selection-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: all; /* Allow mouse events */
+      cursor: crosshair;
+      z-index: 10; /* Above the chart, below tooltips perhaps */
+    }
+    .selection-rectangle {
+      position: absolute;
+      border: 1px solid #4c7cff;
+      background-color: rgba(76, 124, 255, 0.2);
+      pointer-events: none; /* Don't block events on the rectangle itself */
+    }
     .info {
       margin-top: 20px;
       padding: 10px;
       background-color: #f0f8ff;
       border-left: 4px solid #4c7cff;
     }
-
     .control-panel {
       margin-top: 20px;
       padding: 15px;
@@ -33,19 +50,16 @@
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-
     .control-panel label {
       display: block;
       margin-bottom: 8px;
       font-weight: bold;
     }
-
     .control-panel input {
       width: 100px;
       padding: 8px;
       margin-right: 10px;
     }
-
     .control-panel button {
       padding: 8px 16px;
       background-color: #4c7cff;
@@ -54,88 +68,99 @@
       border-radius: 4px;
       cursor: pointer;
     }
-
     .control-panel button:hover {
       background-color: #3a67e0;
     }
-
     .export-button {
       margin-top: 15px;
       background-color: #28a745;
     }
-
     .export-button:hover {
       background-color: #218838;
     }
-
     .control-row {
       display: flex;
       align-items: center;
       margin-bottom: 10px;
+      /* flex-wrap: wrap; Allow wrapping for smaller screens */
+    }
+    .control-row > *:not(:last-child) {
+      margin-right: 10px;
+    }
+    .control-row label {
+      margin-bottom: 0; /* Override default for flex row */
     }
   </style>
 </head>
 <body>
   <h1>Draggable Line Chart</h1>
   <p>Drag any point up or down to modify the y-values of the chart.</p>
-  
+  <p><strong>New:</strong> Click and drag on empty chart space to select multiple points. Then, click and drag any selected point to move all selected points together.</p>
+
   <div class="control-panel">
     <h3>Control Panel</h3>
     <div class="control-row">
       <label for="pointCount">Number of data points:</label>
-      <input type="number" id="pointCount" min="2" max="50" value="10">
-      <label for="maxYValue" style="margin-left: 20px;">Max Y value:</label>
+      <input type="number" id="pointCount" min="2" max="100" value="10">
+      <label for="maxYValue">Max Y value:</label>
       <input type="number" id="maxYValue" min="1" max="1000" value="25">
       <button id="updatePoints">Update</button>
     </div>
     <div class="control-row">
       <button id="randomizeData">Randomize Data</button>
-      <button id="resetData" style="margin-left: 10px;">Reset Data</button>
+      <button id="resetData">Reset Data</button>
+      <button id="clearSelection">Clear Selection</button>
     </div>
     <div class="control-row">
       <button id="exportCSV" class="export-button">Export to CSV</button>
     </div>
   </div>
-
   <div class="chart-container">
     <canvas id="myChart"></canvas>
+    <div class="selection-overlay"></div>
   </div>
-  
+
   <div class="info">
     <p>Last modified point: <span id="modified-point">None yet</span></p>
     <p>Current data points: <span id="current-data">10</span></p>
+    <p>Selected points count: <span id="selected-points-count">0</span></p>
   </div>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2.2.5/dist/chartjs-plugin-dragdata.min.js"></script>
-  
+
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       const ctx = document.getElementById('myChart').getContext('2d');
+      const selectionOverlay = document.querySelector('.selection-overlay');
       let myChart;
-      
+
       // Default data
       const defaultPointCount = 10;
       const defaultData = [12, 19, 3, 5, 2, 3, 8, 14, 10, 7];
       let currentData = [...defaultData];
-      
+      const defaultMaxY = 25;
+
+      // Selection State
+      let isSelecting = false;
+      let selectionRect = null; // DOM element for the rectangle
+      let startMouseX, startMouseY;
+      let selectedPointIndices = [];
+      let isMultiDragging = false;
+      let initialMultiDragY; // Mouse Y when multi-drag starts
+      let initialSelectedPointsData = []; // Data values of selected points when multi-drag starts
+
       // Initialize with default data
-  const defaultMaxY = 25;
-  initChart(defaultPointCount, defaultMaxY);
-      
+      initChart(defaultPointCount, defaultMaxY);
+
       // Function to initialize or update the chart
       function initChart(pointCount, maxY) {
         ensureDataLength(pointCount);
-        // Generate labels as a series of timestamps (e.g., 00:00:00, 00:01:00, ...)
-        const base = new Date();
-        base.setHours(0, 0, 0, 0);
-        const labels = Array.from({length: pointCount}, (_, i) => {
-          const d = new Date(base.getTime() + i * 1 * 60 * 1000); // 1 min interval
-          return d.toISOString(); // ISO format (YYYY-MM-DDTHH:MM:SSZ
-        });
+        const labels = generateLabels(pointCount);
+
         if (myChart) {
           myChart.destroy();
         }
+
         myChart = new Chart(ctx, {
           type: 'line',
           data: {
@@ -149,7 +174,7 @@
               fill: true,
               pointRadius: 6,
               pointHoverRadius: 10,
-              pointBackgroundColor: 'rgb(75, 192, 192)',
+              pointBackgroundColor: getPointBackgroundColors(pointCount), // Dynamic colors
               pointBorderColor: '#fff',
               pointBorderWidth: 2,
               pointHitRadius: 10
@@ -161,7 +186,8 @@
             scales: {
               y: {
                 beginAtZero: true,
-                max: maxY
+                max: maxY,
+                min: 0 // Ensure min is 0 for consistency
               }
             },
             plugins: {
@@ -175,33 +201,104 @@
               dragData: {
                 round: 1,
                 showTooltip: true,
+                // Only allow dragData plugin to work if no multi-drag is active
+                // or if no points are currently selected (i.e. single point drag)
                 onDragStart: function(e, datasetIndex, index, value) {
-                  return true;
+                  // If we're starting a drag on an already selected point,
+                  // and there are multiple selected points, we'll handle it manually.
+                  // Otherwise, let the plugin handle single point drag.
+                  const isPointSelected = selectedPointIndices.includes(index);
+                  if (isPointSelected && selectedPointIndices.length > 1) {
+                    // Prevent plugin's drag, we'll handle multi-drag
+                    isMultiDragging = true;
+                    initialMultiDragY = e.chart.canvas.getBoundingClientRect().top + e.y;
+                    initialSelectedPointsData = selectedPointIndices.map(idx => currentData[idx]);
+                    return false; // Prevent default drag plugin behavior
+                  } else {
+                    // Clear selection if dragging a single point
+                    clearSelection();
+                    return true; // Allow plugin's default drag behavior
+                  }
                 },
                 onDrag: function(e, datasetIndex, index, value) {
+                  if (isMultiDragging) {
+                    // This should ideally not be called if onDragStart returned false.
+                    // But as a fallback, ensure it does nothing if we're in multi-drag mode.
+                    return;
+                  }
                   currentData[index] = value;
+                  document.getElementById('modified-point').textContent =
+                    `Point ${index + 1} (y-value: ${value})`;
                 },
                 onDragEnd: function(e, datasetIndex, index, value) {
-                  document.getElementById('modified-point').textContent = 
+                  if (isMultiDragging) {
+                    // This should ideally not be called if onDragStart returned false.
+                    return;
+                  }
+                  document.getElementById('modified-point').textContent =
                     `Point ${index + 1} (y-value: ${value})`;
+                  // Re-apply colors in case the plugin reset them
+                  updatePointColors();
                 }
               }
             }
           }
         });
         document.getElementById('current-data').textContent = pointCount;
+        updateSelectedPointsCountDisplay();
       }
-      
+
+      // Generate labels as a series of timestamps (e.g., 00:00:00, 00:01:00, ...)
+      function generateLabels(count) {
+        const base = new Date();
+        base.setHours(0, 0, 0, 0);
+        return Array.from({length: count}, (_, i) => {
+          const d = new Date(base.getTime() + i * 1 * 60 * 1000); // 1 min interval
+          return d.toISOString(); // ISO format (YYYY-MM-DDTHH:MM:SSZ)
+        });
+      }
+
       // Ensure we have enough data for the requested points
       function ensureDataLength(count) {
-        // If we need more data points than we have, add random values
         if (currentData.length < count) {
           for (let i = currentData.length; i < count; i++) {
             currentData.push(Math.floor(Math.random() * 20) + 1);
           }
         }
+        // Trim data if point count is reduced
+        currentData = currentData.slice(0, count);
+        clearSelection(); // Clear selection if data changes
       }
-      
+
+      // Get dynamic point background colors based on selection
+      function getPointBackgroundColors(pointCount) {
+        const colors = [];
+        for (let i = 0; i < pointCount; i++) {
+          colors.push(selectedPointIndices.includes(i) ? 'red' : 'rgb(75, 192, 192)');
+        }
+        return colors;
+      }
+
+      // Update point colors after selection changes
+      function updatePointColors() {
+        if (myChart && myChart.data && myChart.data.datasets[0]) {
+          myChart.data.datasets[0].pointBackgroundColor = getPointBackgroundColors(currentData.length);
+          myChart.update();
+        }
+      }
+
+      // Update selected points count display
+      function updateSelectedPointsCountDisplay() {
+        document.getElementById('selected-points-count').textContent = selectedPointIndices.length;
+      }
+
+      // Clear selection
+      function clearSelection() {
+        selectedPointIndices = [];
+        updatePointColors();
+        updateSelectedPointsCountDisplay();
+      }
+
       // Event listener for updating the number of points
       document.getElementById('updatePoints').addEventListener('click', function() {
         const pointCount = parseInt(document.getElementById('pointCount').value);
@@ -212,7 +309,7 @@
           alert("Please enter a valid number of points (2-100) and max Y value (1-1000).");
         }
       });
-      
+
       // Event listener for randomizing data
       document.getElementById('randomizeData').addEventListener('click', function() {
         const pointCount = parseInt(document.getElementById('current-data').textContent);
@@ -220,7 +317,7 @@
         currentData = Array.from({length: pointCount}, () => Math.floor(Math.random() * (maxY - 1 + 1)) + 1);
         initChart(pointCount, maxY);
       });
-      
+
       // Event listener for resetting data
       document.getElementById('resetData').addEventListener('click', function() {
         const pointCount = parseInt(document.getElementById('current-data').textContent);
@@ -229,35 +326,30 @@
         ensureDataLength(pointCount);
         initChart(pointCount, maxY);
       });
-      
+
+      // Event listener for clearing selection
+      document.getElementById('clearSelection').addEventListener('click', clearSelection);
+
       // CSV Export functionality
       document.getElementById('exportCSV').addEventListener('click', function() {
         exportToCSV();
       });
-      
+
       // Function to export current data to CSV
       function exportToCSV() {
         const pointCount = parseInt(document.getElementById('current-data').textContent);
         const data = currentData.slice(0, pointCount);
-        
-        // CSV Header
+
         let csvContent = "x,y\n";
-        // Use the same labels as the chart for the x values
-        const base = new Date();
-        base.setHours(0, 0, 0, 0);
-        const labels = Array.from({length: pointCount}, (_, i) => {
-          const d = new Date(base.getTime() + i * 1 * 60 * 1000);
-          return d.toISOString(); // ISO format (YYYY-MM-DDTHH:MM:SSZ
-        });
+        const labels = generateLabels(pointCount);
+
         for (let i = 0; i < pointCount; i++) {
           csvContent += `${labels[i]},${data[i]}\n`;
         }
-        
-        // Create a Blob and download link
+
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
-        
-        // Create download link and trigger click
+
         const link = document.createElement('a');
         link.setAttribute('href', url);
         link.setAttribute('download', 'chart_data.csv');
@@ -266,6 +358,193 @@
         link.click();
         document.body.removeChild(link);
       }
+
+      // --- Multi-Point Selection and Dragging Logic ---
+
+      // Helper to get mouse coordinates relative to the overlay
+      function getRelativeMouseCoords(event) {
+        const rect = selectionOverlay.getBoundingClientRect();
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        };
+      }
+
+      // Start selection or multi-drag
+      selectionOverlay.addEventListener('mousedown', function(e) {
+        // Check if a point was clicked. Chart.js provides this via getElementsAtEventForMode.
+        // Note: Chart.js's getElementsAtEventForMode expects a ChartEvent,
+        // so we need to create a dummy one or pass the raw event.
+        const activePoints = myChart.getElementsAtEventForMode(e, 'point', { intersect: true }, false);
+
+        if (activePoints.length > 0) {
+          // A point was clicked
+          const clickedPointIndex = activePoints[0].index;
+          const isPointSelected = selectedPointIndices.includes(clickedPointIndex);
+
+          if (e.shiftKey || e.ctrlKey || e.metaKey) { // Allow adding/removing from selection
+            if (isPointSelected) {
+              selectedPointIndices = selectedPointIndices.filter(idx => idx !== clickedPointIndex);
+            } else {
+              selectedPointIndices.push(clickedPointIndex);
+            }
+            updatePointColors();
+            updateSelectedPointsCountDisplay();
+            // Prevent dragdata plugin from starting a drag if we're just modifying selection
+            return;
+          } else if (isPointSelected && selectedPointIndices.length > 1) {
+            // Initiate multi-drag if clicking an already selected point with others selected
+            isMultiDragging = true;
+            initialMultiDragY = getRelativeMouseCoords(e).y;
+            initialSelectedPointsData = selectedPointIndices.map(idx => currentData[idx]);
+            selectionOverlay.style.cursor = 'grabbing';
+            // Important: We need to prevent chartjs-plugin-dragdata from taking over.
+            // This is handled in the plugin's onDragStart callback.
+          } else {
+            // Single point drag or new selection. Clear existing selection.
+            clearSelection();
+            selectedPointIndices.push(clickedPointIndex); // Select the clicked point
+            updatePointColors();
+            updateSelectedPointsCountDisplay();
+            // Let chartjs-plugin-dragdata handle this.
+            // We need to re-trigger the mousedown event on the chart canvas
+            // so chartjs-plugin-dragdata can pick it up.
+            // This is a bit hacky but ensures the plugin's internal state is correct.
+            const chartCanvas = document.getElementById('myChart');
+            const newEvent = new MouseEvent('mousedown', {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              button: e.button,
+              buttons: e.buttons,
+              // Copy other properties if needed
+            });
+            chartCanvas.dispatchEvent(newEvent);
+          }
+        } else {
+          // No point clicked, start selection rectangle
+          clearSelection(); // Clear previous selection
+          isSelecting = true;
+          const coords = getRelativeMouseCoords(e);
+          startMouseX = coords.x;
+          startMouseY = coords.y;
+
+          selectionRect = document.createElement('div');
+          selectionRect.className = 'selection-rectangle';
+          selectionRect.style.left = startMouseX + 'px';
+          selectionRect.style.top = startMouseY + 'px';
+          selectionRect.style.width = '0px';
+          selectionRect.style.height = '0px';
+          selectionOverlay.appendChild(selectionRect);
+        }
+      });
+
+      selectionOverlay.addEventListener('mousemove', function(e) {
+        const coords = getRelativeMouseCoords(e);
+
+        if (isSelecting && selectionRect) {
+          const currentX = coords.x;
+          const currentY = coords.y;
+
+          const width = Math.abs(currentX - startMouseX);
+          const height = Math.abs(currentY - startMouseY);
+          const left = Math.min(currentX, startMouseX);
+          const top = Math.min(currentY, startMouseY);
+
+          selectionRect.style.left = left + 'px';
+          selectionRect.style.top = top + 'px';
+          selectionRect.style.width = width + 'px';
+          selectionRect.style.height = height + 'px';
+        } else if (isMultiDragging) {
+          const currentMouseY = coords.y;
+          const deltaY = currentMouseY - initialMultiDragY;
+          const yScale = myChart.scales.y;
+          const yRange = yScale.max - yScale.min;
+          const pixelRange = yScale.bottom - yScale.top; // Pixel height of the y-axis
+
+          // Convert pixel delta to data value delta
+          const dataDelta = -(deltaY / pixelRange) * yRange; // Negative because Y pixels increase downwards
+
+          // Apply delta to all selected points
+          selectedPointIndices.forEach((index, i) => {
+            let newValue = initialSelectedPointsData[i] + dataDelta;
+            // Clamp value to chart's Y-axis bounds
+            newValue = Math.max(yScale.min, Math.min(yScale.max, newValue));
+            currentData[index] = Math.round(newValue * 10) / 10; // Round to 1 decimal place
+          });
+
+          myChart.data.datasets[0].data = currentData.slice(0, myChart.data.labels.length);
+          myChart.update('none'); // 'none' for no animation
+        }
+      });
+
+      selectionOverlay.addEventListener('mouseup', function(e) {
+        if (isSelecting) {
+          isSelecting = false;
+          if (selectionRect) {
+            selectionOverlay.removeChild(selectionRect);
+            selectionRect = null;
+
+            // Determine points within the selection rectangle
+            const chartArea = myChart.chartArea;
+            const selectionBounds = {
+              left: Math.min(startMouseX, getRelativeMouseCoords(e).x),
+              right: Math.max(startMouseX, getRelativeMouseCoords(e).x),
+              top: Math.min(startMouseY, getRelativeMouseCoords(e).y),
+              bottom: Math.max(startMouseY, getRelativeMouseCoords(e).y)
+            };
+
+            // Filter points to be within the chart's drawable area as well
+            selectionBounds.left = Math.max(selectionBounds.left, chartArea.left);
+            selectionBounds.right = Math.min(selectionBounds.right, chartArea.right);
+            selectionBounds.top = Math.max(selectionBounds.top, chartArea.top);
+            selectionBounds.bottom = Math.min(selectionBounds.bottom, chartArea.bottom);
+
+            selectedPointIndices = [];
+            const dataset = myChart.data.datasets[0];
+            const meta = myChart.getDatasetMeta(0);
+
+            meta.data.forEach((point, index) => {
+              const pointX = point.x;
+              const pointY = point.y;
+
+              if (pointX >= selectionBounds.left && pointX <= selectionBounds.right &&
+                  pointY >= selectionBounds.top && pointY <= selectionBounds.bottom) {
+                selectedPointIndices.push(index);
+              }
+            });
+            updatePointColors();
+            updateSelectedPointsCountDisplay();
+          }
+        } else if (isMultiDragging) {
+          isMultiDragging = false;
+          selectionOverlay.style.cursor = 'crosshair';
+          // Update the modified-point info for one of the points
+          if (selectedPointIndices.length > 0) {
+             const lastIdx = selectedPointIndices[selectedPointIndices.length - 1];
+             document.getElementById('modified-point').textContent =
+                    `Multiple points modified, last: Point ${lastIdx + 1} (y-value: ${currentData[lastIdx]})`;
+          }
+        }
+      });
+
+      // Clear selection on Escape key
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          clearSelection();
+        }
+      });
+
+      // Clear selection if clicking outside chart area
+      document.addEventListener('click', function(e) {
+        const chartContainer = document.querySelector('.chart-container');
+        if (!chartContainer.contains(e.target) && selectedPointIndices.length > 0) {
+          clearSelection();
+        }
+      });
+
     });
   </script>
 </body>
