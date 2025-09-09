@@ -196,7 +196,9 @@
                 },
                 ticks: {
                   maxRotation: 45,
-                  minRotation: 45
+                  minRotation: 45,
+                  maxTicksLimit: 5, // Show maximum of 5 labels
+                  // autoSkip: true // Automatically skip labels to fit the limit
                 }
               },
               y: {
@@ -267,59 +269,62 @@
       function generateLabels(count) {
         const aggregation = document.getElementById('timeAggregation').value;
         const base = new Date();
-        
         // Set the appropriate starting point based on aggregation
         switch(aggregation) {
           case 'minutes':
           case 'hours':
-            // Start from 00:00:00 today
-            base.setHours(0, 0, 0, 0);
+            base.setUTCHours(0, 0, 0, 0);
             break;
           case 'days':
-            // Start from 1st of current month
-            base.setDate(1);
-            base.setHours(0, 0, 0, 0);
+            base.setUTCHours(0, 0, 0, 0);
+            base.setUTCDate(1);
             break;
           case 'months':
-            // Start from January of current year
-            base.setMonth(0, 1);
-            base.setHours(0, 0, 0, 0);
+            base.setUTCHours(0, 0, 0, 0);
+            base.setUTCMonth(0);
+            base.setUTCDate(1);
             break;
         }
-        
-        // Calculate interval in milliseconds based on aggregation
-        const getInterval = (agg) => {
-          switch(agg) {
-            case 'minutes': return 60 * 1000; // 1 minute
-            case 'hours': return 60 * 60 * 1000; // 1 hour
-            case 'days': return 24 * 60 * 60 * 1000; // 1 day
-            case 'months': return 30 * 24 * 60 * 60 * 1000; // ~30 days (approximate)
-            default: return 60 * 1000;
-          }
-        };
-        
         // Format the date based on aggregation level
-        // Fix ISO string to start from base
         const formatDate = (date, agg) => {
           switch(agg) {
             case 'minutes':
-              return date.toISOString(); // HH:MM:SS
+              return date.toISOString();
             case 'hours':
-              return date.toTimeString().slice(0, 5); // HH:MM
+              return date.toISOString();
             case 'days':
-              return date.toISOString().split('T')[0]; // YYYY-MM-DD
+              return date.toISOString().split('T')[0];
             case 'months':
-              return date.toISOString().slice(0, 7); // YYYY-MM
+              return date.toISOString().split('T')[0];
             default:
               return date.toTimeString().slice(0, 8);
           }
         };
-
-        const interval = getInterval(aggregation);
-        return Array.from({length: count}, (_, i) => {
-          const d = new Date(base.getTime() + i * interval);
-          return formatDate(d, aggregation);
-        });
+        if (aggregation === 'months') {
+          // Dynamic month increment
+          let d = new Date(base);
+          d.setUTCHours(0, 0, 0, 0);
+          return Array.from({length: count}, (_, i) => {
+            const label = formatDate(d, aggregation);
+            d = new Date(Date.UTC(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0, 0)); // Next month, 1st day
+            return label;
+          });
+        } else {
+          // Calculate interval in milliseconds based on aggregation
+          const getInterval = (agg) => {
+            switch(agg) {
+              case 'minutes': return 60 * 1000;
+              case 'hours': return 60 * 60 * 1000;
+              case 'days': return 24 * 60 * 60 * 1000;
+              default: return 60 * 1000;
+            }
+          };
+          const interval = getInterval(aggregation);
+          return Array.from({length: count}, (_, i) => {
+            const d = new Date(base.getTime() + i * interval);
+            return formatDate(d, aggregation);
+          });
+        }
       }
 
       // Ensure we have enough data for the requested points
